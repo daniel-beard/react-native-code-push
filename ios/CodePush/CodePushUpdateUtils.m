@@ -7,16 +7,20 @@ NSString * const AssetsFolderName = @"assets";
 NSString * const BinaryHashKey = @"CodePushBinaryHash";
 NSString * const ManifestFolderPrefix = @"CodePush";
 
-+ (void)addContentsOfFolderToManifest:(NSString *)folderPath
++ (BOOL)addContentsOfFolderToManifest:(NSString *)folderPath
                            pathPrefix:(NSString *)pathPrefix
                              manifest:(NSMutableArray *)manifest
                                 error:(NSError **)error
 {
-    NSArray* folderFiles = [[NSFileManager defaultManager]
+    NSError *localError;
+    NSArray *folderFiles = [[NSFileManager defaultManager]
                             contentsOfDirectoryAtPath:folderPath
-                            error:error];
-    if (*error) {
-        return;
+                            error:&localError];
+    if (!folderFiles) {
+        if (localError && error) {
+            *error = localError;
+        }
+        return NO;
     }
     
     for (NSString *fileName in folderFiles) {
@@ -30,12 +34,15 @@ NSString * const ManifestFolderPrefix = @"CodePush";
         BOOL isDir = NO;
         if ([[NSFileManager defaultManager] fileExistsAtPath:fullFilePath
                                                  isDirectory:&isDir] && isDir) {
-            [self addContentsOfFolderToManifest:fullFilePath
-                                     pathPrefix:relativePath
-                                       manifest:manifest
-                                          error:error];
-            if (*error) {
-                return;
+            BOOL result = [self addContentsOfFolderToManifest:fullFilePath
+                                                   pathPrefix:relativePath
+                                                     manifest:manifest
+                                                        error:&localError];
+            if (!result) {
+                if (error) {
+                    *error = localError;
+                }
+                return NO;
             }
         } else {
             NSData *fileContents = [NSData dataWithContentsOfFile:fullFilePath];
@@ -43,6 +50,7 @@ NSString * const ManifestFolderPrefix = @"CodePush";
             [manifest addObject:[[relativePath stringByAppendingString:@":"] stringByAppendingString:fileContentsHash]];
         }
     }
+    return YES;
 }
 
 + (void)addFileToManifest:(NSURL *)fileURL
@@ -58,11 +66,15 @@ NSString * const ManifestFolderPrefix = @"CodePush";
 + (NSString *)computeFinalHashFromManifest:(NSMutableArray *)manifest
                                      error:(NSError **)error
 {
+    NSError *localError;
     NSArray *sortedManifest = [manifest sortedArrayUsingSelector:@selector(compare:)];
     NSData *manifestData = [NSJSONSerialization dataWithJSONObject:sortedManifest
                                                            options:kNilOptions
-                                                             error:error];
-    if (*error) {
+                                                             error:&localError];
+    if (!manifestData) {
+        if (localError && error) {
+            *error = localError;
+        }
         return nil;
     }
     
@@ -90,10 +102,14 @@ NSString * const ManifestFolderPrefix = @"CodePush";
                  destFolder:(NSString *)destFolder
                       error:(NSError **)error
 {
+    NSError *localError;
     NSArray* files = [[NSFileManager defaultManager]
                       contentsOfDirectoryAtPath:sourceFolder
-                      error:error];
-    if (*error) {
+                      error:&localError];
+    if (!files) {
+        if (localError && error) {
+            *error = localError;
+        }
         return;
     }
     
@@ -105,27 +121,36 @@ NSString * const ManifestFolderPrefix = @"CodePush";
             NSString *nestedDestFolder = [destFolder stringByAppendingPathComponent:fileName];
             [self copyEntriesInFolder:fullFilePath
                            destFolder:nestedDestFolder
-                                error:error];
+                                error:&localError];
         } else {
             NSString *destFileName = [destFolder stringByAppendingPathComponent:fileName];
             if ([[NSFileManager defaultManager] fileExistsAtPath:destFileName]) {
-                [[NSFileManager defaultManager] removeItemAtPath:destFileName error:error];
-                if (*error) {
+                BOOL result = [[NSFileManager defaultManager] removeItemAtPath:destFileName error:&localError];
+                if (!result) {
+                    if (localError && error) {
+                        *error = localError;
+                    }
                     return;
                 }
             }
             if (![[NSFileManager defaultManager] fileExistsAtPath:destFolder]) {
-                [[NSFileManager defaultManager] createDirectoryAtPath:destFolder
+                BOOL result = [[NSFileManager defaultManager] createDirectoryAtPath:destFolder
                                           withIntermediateDirectories:YES
                                                            attributes:nil
-                                                                error:error];
-                if (*error) {
+                                                                error:&localError];
+                if (!result) {
+                    if (localError && error) {
+                        *error = localError;
+                    }
                     return;
                 }
             }
             
-            [[NSFileManager defaultManager] copyItemAtPath:fullFilePath toPath:destFileName error:error];
-            if (*error) {
+            BOOL result = [[NSFileManager defaultManager] copyItemAtPath:fullFilePath toPath:destFileName error:&localError];
+            if (!result) {
+                if (localError && error) {
+                    *error = localError;
+                }
                 return;
             }
         }
@@ -136,10 +161,14 @@ NSString * const ManifestFolderPrefix = @"CodePush";
                     expectedFileName:(NSString *)expectedFileName
                                error:(NSError **)error
 {
+    NSError *localError;
     NSArray* folderFiles = [[NSFileManager defaultManager]
                             contentsOfDirectoryAtPath:folderPath
-                            error:error];
-    if (*error) {
+                            error:&localError];
+    if (!folderFiles) {
+        if (localError && error) {
+            *error = localError;
+        }
         return nil;
     }
     
@@ -150,8 +179,11 @@ NSString * const ManifestFolderPrefix = @"CodePush";
                                                  isDirectory:&isDir] && isDir) {
             NSString *mainBundlePathInFolder = [self findMainBundleInFolder:fullFilePath
                                                            expectedFileName:expectedFileName
-                                                                      error:error];
-            if (*error) {
+                                                                      error:&localError];
+            if (!mainBundlePathInFolder) {
+                if (localError && error) {
+                    *error = localError;
+                }
                 return nil;
             }
             
@@ -175,6 +207,7 @@ NSString * const ManifestFolderPrefix = @"CodePush";
                                  error:(NSError **)error
 {
     // Get the cached hash from user preferences if it exists.
+    NSError *localError;
     NSString *binaryModifiedDate = [self modifiedDateStringOfFileAtURL:binaryBundleUrl];
     NSUserDefaults *preferences = [NSUserDefaults standardUserDefaults];
     NSMutableDictionary *binaryHashDictionary = [preferences objectForKey:BinaryHashKey];
@@ -196,11 +229,14 @@ NSString * const ManifestFolderPrefix = @"CodePush";
     // them to the generated content manifest.
     NSString *assetsPath = [CodePush bundleAssetsPath];
     if ([[NSFileManager defaultManager] fileExistsAtPath:assetsPath]) {
-        [self addContentsOfFolderToManifest:assetsPath
-                                 pathPrefix:[NSString stringWithFormat:@"%@/%@", [self manifestFolderPrefix], @"assets"]
-                                   manifest:manifest
-                                      error:error];
-        if (*error) {
+        BOOL result = [self addContentsOfFolderToManifest:assetsPath
+                                               pathPrefix:[NSString stringWithFormat:@"%@/%@", [self manifestFolderPrefix], @"assets"]
+                                                 manifest:manifest
+                                                    error:&localError];
+        if (!result) {
+            if (error) {
+                *error = localError;
+            }
             return nil;
         }
     }
@@ -208,7 +244,7 @@ NSString * const ManifestFolderPrefix = @"CodePush";
     [self addFileToManifest:binaryBundleUrl manifest:manifest];
     [self addFileToManifest:[binaryBundleUrl URLByAppendingPathExtension:@"meta"] manifest:manifest];
 
-    binaryHash = [self computeFinalHashFromManifest:manifest error:error];
+    binaryHash = [self computeFinalHashFromManifest:manifest error:&localError];
     
     // Cache the hash in user preferences. This assumes that the modified date for the
     // JS bundle changes every time a new bundle is generated by the packager.
@@ -238,18 +274,25 @@ NSString * const ManifestFolderPrefix = @"CodePush";
                    expectedHash:(NSString *)expectedHash
                           error:(NSError **)error
 {
+    NSError *localError;
     NSMutableArray *updateContentsManifest = [NSMutableArray array];
-    [self addContentsOfFolderToManifest:finalUpdateFolder
-                             pathPrefix:@""
-                               manifest:updateContentsManifest
-                                  error:error];
-    if (*error) {
+    BOOL result = [self addContentsOfFolderToManifest:finalUpdateFolder
+                                           pathPrefix:@""
+                                             manifest:updateContentsManifest
+                                                error:&localError];
+    if (!result) {
+        if (error) {
+            *error = localError;
+        }
         return NO;
     }
-    
+
     NSString *updateContentsManifestHash = [self computeFinalHashFromManifest:updateContentsManifest
-                                                                        error:error];
-    if (*error || updateContentsManifestHash == nil) {
+                                                                        error:&localError];
+    if (updateContentsManifestHash == nil) {
+        if (error) {
+            *error = localError;
+        }
         return NO;
     }
     
